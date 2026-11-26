@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Juliaca Limpia — Fase 1</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100vh; font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      background: radial-gradient(circle at 15% 10%, #14532d 0, #052e16 38%, #030712 100%);
+      color: #e5e7eb; display: grid; place-items: center; padding: 2rem;
+    }
+    main { width: min(980px, 100%); }
+    .tag {
+      display: inline-block; font-size: .75rem; letter-spacing: .14em; text-transform: uppercase;
+      color: #86efac; border: 1px solid #166534; background: #052e16; padding: .4rem .8rem;
+      border-radius: 999px; margin-bottom: 1.2rem;
+    }
+    h1 { font-size: clamp(2.2rem, 6vw, 4rem); line-height: 1; margin: 0 0 .8rem; }
+    h1 span { color: #4ade80; }
+    p.lead { color: #9ca3af; font-size: 1.05rem; max-width: 62ch; line-height: 1.6; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: .9rem; margin: 2rem 0; }
+    .card {
+      border: 1px solid #1f2937; border-radius: 14px; padding: 1rem 1.1rem;
+      background: rgba(17, 24, 39, .72); backdrop-filter: blur(6px);
+    }
+    .card h2 { font-size: .8rem; text-transform: uppercase; letter-spacing: .1em; color: #9ca3af; margin: 0 0 .5rem; }
+    .card .value { font-size: 1.9rem; font-weight: 700; }
+    .ok { color: #4ade80; } .bad { color: #f87171; }
+    a { color: #86efac; }
+    code { background: #111827; border: 1px solid #1f2937; padding: .15rem .4rem; border-radius: 6px; font-size: .85em; }
+    footer { color: #6b7280; font-size: .85rem; margin-top: 1.5rem; }
+    ul { color: #9ca3af; line-height: 1.8; padding-left: 1.2rem; }
+  </style>
+</head>
+<body>
+  <main>
+    <span class="tag">Fase 1 · Infraestructura y backend</span>
+    <h1>Juliaca <span>Limpia</span></h1>
+    <p class="lead">
+      Gestión inteligente de residuos sólidos para la Municipalidad Provincial de San Román.
+      La API, PostGIS, MinIO y el microservicio de análisis ya están en marcha; el frontend
+      Angular se incorpora en la Fase 2.
+    </p>
+
+    <div class="grid">
+      <div class="card"><h2>API Go</h2><div class="value" id="api">…</div></div>
+      <div class="card"><h2>Zonas en el mapa</h2><div class="value" id="zonas">…</div></div>
+      <div class="card"><h2>Camiones</h2><div class="value" id="camiones">…</div></div>
+      <div class="card"><h2>Servicio ML</h2><div class="value" id="ml">…</div></div>
+    </div>
+
+    <ul>
+      <li>API: <a href="/api/mapa/estado">/api/mapa/estado</a> · <a href="/api/estadisticas?periodo=mensual">/api/estadisticas</a></li>
+      <li>Eventos en vivo: <code>GET /api/events</code> (SSE)</li>
+      <li>MinIO: <a href="http://localhost:9001" target="_blank" rel="noreferrer">http://localhost:9001</a></li>
+      <li>Swagger del ML: <a href="http://localhost:8000/docs" target="_blank" rel="noreferrer">http://localhost:8000/docs</a></li>
+    </ul>
+
+    <footer>Fase 1 verificada · Docker Compose + PostGIS + Go + FastAPI</footer>
+  </main>
+
+  <script>
+    const set = (id, text, ok) => {
+      const el = document.getElementById(id);
+      el.textContent = text;
+      el.className = 'value ' + (ok ? 'ok' : 'bad');
+    };
+
+    fetch('/health').then(r => r.json()).then(d => {
+      set('api', d.status === 'ok' ? 'OK' : d.status.toUpperCase(), d.status === 'ok');
+    }).catch(() => set('api', 'OFFLINE', false));
+
+    fetch('/api/mapa/estado').then(r => r.json()).then(d => {
+      set('zonas', d.zonas.length, d.zonas.length > 0);
+      set('camiones', d.camiones.length, d.camiones.length > 0);
+    }).catch(() => { set('zonas', '—', false); set('camiones', '—', false); });
+
+    fetch('http://localhost:8000/health').then(r => r.json()).then(d => {
+      set('ml', d.status === 'ok' ? 'OK' : 'REVISAR', d.status === 'ok');
+    }).catch(() => set('ml', 'OFFLINE', false));
+  </script>
+</body>
+</html>

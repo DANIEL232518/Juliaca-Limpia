@@ -1,0 +1,804 @@
+openapi: 3.0.3
+info:
+  title: Juliaca Limpia API
+  version: 1.0.0
+  description: |
+    API de gestión inteligente de residuos sólidos para la Municipalidad Provincial de
+    San Román — Juliaca. Agrupa reportes ciudadanos con PostGIS, estima volumen con el
+    microservicio Python, planifica rutas de camiones y publica cambios por SSE.
+
+    Los endpoints de escritura aún no requieren autenticación (Fase 1). En producción se
+    agregará JWT/OIDC y autorización por rol.
+  contact:
+    name: Equipo Juliaca Limpia
+servers:
+  - url: http://localhost:8080
+    description: Entorno local (Docker Compose)
+tags:
+  - name: Reportes
+  - name: Mapa
+  - name: Rutas
+  - name: Tratamiento
+  - name: Estadísticas
+  - name: Tiempo real
+  - name: Catálogo
+
+paths:
+  /health:
+    get:
+      tags: [Catálogo]
+      summary: Estado de la API, PostgreSQL y ml-service
+      responses:
+        '200':
+          description: Servicio operativo o degradado (si falla el ML)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [ok, degradado]
+                  servicio:
+                    type: string
+                  version:
+                    type: string
+                  clientes_sse:
+                    type: integer
+                  checks:
+                    type: object
+                    additionalProperties:
+                      type: object
+                      properties:
+                        ok:
+                          type: boolean
+                        error:
+                          type: string
+        '503':
+          description: PostgreSQL no disponible
+
+  /api/reportes:
+    get:
+      tags: [Reportes]
+      summary: Reportes de un ciudadano con el estado de su zona
+      description: |
+        Devuelve los reportes del ciudadano (`usuario_id`) ordenados del más reciente al
+        más antiguo, junto con el estado de la zona (`pendiente`, `en_ruta`, `tratado`) y
+        la foto de evidencia de limpieza cuando corresponde. Alimenta la lista
+        "Mis Reportes / Estado en mi Zona" del frontend.
+      parameters:
+        - name: usuario_id
+          in: query
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '200':
+          description: Reportes del ciudadano
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  reportes:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ReporteUsuario'
+                  total:
+                    type: integer
+        '400':
+          $ref: '#/components/responses/Error'
+    post:
+      tags: [Reportes]
+      summary: Registrar un reporte ciudadano con foto
+      description: |
+        Sube la foto a MinIO, llama a `POST /analyze` del ml-service, agrupa el reporte en
+        una zona abierta a menos de 20 m (geography) o crea una nueva, y emite el evento
+        SSE `reporte_creado`.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [foto, lat, lng]
+              properties:
+                foto:
+                  type: string
+                  format: binary
+                  description: JPG, PNG o WebP (máx. 15 MB)
+                lat:
+                  type: number
+                  format: double
+                  example: -15.4972
+                lng:
+                  type: number
+                  format: double
+                  example: -70.1362
+                direccion_referencia:
+                  type: string
+                  example: Mercado Pedro Vilcapaza
+                comentario:
+                  type: string
+                usuario_id:
+                  type: integer
+                  format: int64
+                volumen_litros:
+                  type: number
+                  description: Opcional; fuerza el volumen para pruebas.
+      responses:
+        '201':
+          description: Reporte creado o agrupado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  zona:
+                    $ref: '#/components/schemas/Zona'
+                  reporte:
+                    $ref: '#/components/schemas/Reporte'
+                  analisis:
+                    $ref: '#/components/schemas/Analisis'
+                  zona_nueva:
+                    type: boolean
+                  mensaje:
+                    type: string
+        '400':
+          $ref: '#/components/responses/Error'
+        '422':
+          description: Imagen borrosa o volumen de evidencia inválido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '502':
+          $ref: '#/components/responses/Error'
+
+  /api/mapa/estado:
+    get:
+      tags: [Mapa]
+      summary: Zonas y camiones para el mapa en vivo
+      responses:
+        '200':
+          description: Estado completo del mapa
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MapaEstado'
+
+  /api/rutas:
+    get:
+      tags: [Rutas]
+      summary: Rutas activas con sus paradas
+      description: |
+        Devuelve las rutas no finalizadas del día con sus paradas ordenadas, zonas asociadas y
+        métricas de distancia/volumen. Lo consume el frontend para dibujar las polilíneas y el
+        panel del conductor.
+      responses:
+        '200':
+          description: Rutas activas
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  rutas:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Ruta'
+                  total:
+                    type: integer
+
+  /api/rutas/generar:
+    post:
+      tags: [Rutas]
+      summary: Generar y guardar rutas óptimas
+      description: |
+        Usa Vecino Más Cercano + 2-opt en el ml-service. Reemplaza las rutas activas de los
+        camiones involucrados, guarda paradas y emite `rutas_generadas`.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                camion_ids:
+                  type: array
+                  items:
+                    type: integer
+                    format: int64
+                zona_ids:
+                  type: array
+                  items:
+                    type: integer
+                    format: int64
+      responses:
+        '200':
+          description: Planificación guardada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  rutas:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Ruta'
+                  metricas:
+                    type: object
+                    additionalProperties: true
+                  sin_asignar:
+                    type: array
+                    items:
+                      type: integer
+                      format: int64
+                  mensaje:
+                    type: string
+        '409':
+          description: No hay camiones disponibles o zonas pendientes
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '502':
+          $ref: '#/components/responses/Error'
+
+  /api/zonas/{id}/detalle:
+    get:
+      tags: [Mapa]
+      summary: Detalle de una zona con reportes y evidencia
+      description: |
+        Alimenta el popup del mapa: zona, reportes ciudadanos (con foto) y la evidencia
+        de limpieza más reciente, si la zona ya fue tratada.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '200':
+          description: Detalle de la zona
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ZonaDetalle'
+        '404':
+          $ref: '#/components/responses/Error'
+
+  /api/zonas/{id}/tratar:
+    post:
+      tags: [Tratamiento]
+      summary: Cerrar una zona con foto de evidencia
+      description: |
+        Analiza la evidencia en modo `evidencia`. Si el volumen restante es mayor a 25 L
+        responde 422. Si es válido, guarda la evidencia, marca la zona `tratado`, completa
+        la parada, acumula la carga del camión y emite `zona_tratada`.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [foto_evidencia, camion_id, conductor_id]
+              properties:
+                foto_evidencia:
+                  type: string
+                  format: binary
+                camion_id:
+                  type: integer
+                  format: int64
+                conductor_id:
+                  type: integer
+                  format: int64
+                observacion:
+                  type: string
+      responses:
+        '200':
+          description: Zona tratada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  zona:
+                    $ref: '#/components/schemas/Zona'
+                  evidencia:
+                    $ref: '#/components/schemas/Evidencia'
+                  analisis:
+                    $ref: '#/components/schemas/Analisis'
+                  volumen_recolectado_litros:
+                    type: number
+                  mensaje:
+                    type: string
+        '404':
+          $ref: '#/components/responses/Error'
+        '409':
+          description: La zona ya fue tratada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: El volumen restante supera 25 L
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/estadisticas:
+    get:
+      tags: [Estadísticas]
+      summary: Series y resumen de gestión
+      parameters:
+        - name: periodo
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [semanal, mensual, anual]
+            default: mensual
+      responses:
+        '200':
+          description: Estadísticas agrupadas
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Estadisticas'
+        '400':
+          $ref: '#/components/responses/Error'
+
+  /api/events:
+    get:
+      tags: [Tiempo real]
+      summary: Stream SSE de eventos
+      description: |
+        Eventos: `reporte_creado`, `rutas_generadas`, `zona_tratada`. Cada mensaje contiene
+        `tipo`, `datos` y `emitido_en`. Heartbeat cada 20 segundos.
+      responses:
+        '200':
+          description: Stream de eventos
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                example: |
+                  event: reporte_creado
+                  data: {"tipo":"reporte_creado","datos":{...},"emitido_en":"..."}
+
+  /api/zonas:
+    get:
+      tags: [Catálogo]
+      summary: Listar zonas
+      parameters:
+        - name: estado
+          in: query
+          schema:
+            type: string
+            enum: [pendiente, en_ruta, tratado]
+      responses:
+        '200':
+          description: Zonas encontradas
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  zonas:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Zona'
+                  total:
+                    type: integer
+
+  /api/camiones:
+    get:
+      tags: [Catálogo]
+      summary: Listar camiones
+      responses:
+        '200':
+          description: Camiones registrados
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  camiones:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Camion'
+                  total:
+                    type: integer
+
+components:
+  responses:
+    Error:
+      description: Error de validación o de servicio
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+  schemas:
+    Error:
+      type: object
+      required: [error, mensaje]
+      properties:
+        error:
+          type: string
+          example: sin_zonas_pendientes
+        mensaje:
+          type: string
+        detalles:
+          type: object
+          additionalProperties: true
+
+    Zona:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        lat:
+          type: number
+          example: -15.4972
+        lng:
+          type: number
+          example: -70.1362
+        direccion_referencia:
+          type: string
+        volumen_estimado_litros:
+          type: number
+        nivel:
+          type: string
+          enum: [bajo, medio, critico]
+        estado:
+          type: string
+          enum: [pendiente, en_ruta, tratado]
+        total_reportes:
+          type: integer
+        creado_en:
+          type: string
+          format: date-time
+        tratado_en:
+          type: string
+          format: date-time
+          nullable: true
+
+    Reporte:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        zona_id:
+          type: integer
+          format: int64
+        usuario_id:
+          type: integer
+          format: int64
+          nullable: true
+        foto_url:
+          type: string
+          nullable: true
+        volumen_litros:
+          type: number
+        nivel:
+          type: string
+          enum: [bajo, medio, critico]
+        comentario:
+          type: string
+          nullable: true
+        creado_en:
+          type: string
+          format: date-time
+
+    Evidencia:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        zona_id:
+          type: integer
+          format: int64
+        camion_id:
+          type: integer
+          format: int64
+          nullable: true
+        conductor_id:
+          type: integer
+          format: int64
+          nullable: true
+        foto_evidencia_url:
+          type: string
+          nullable: true
+        volumen_restante_litros:
+          type: number
+        observacion:
+          type: string
+          nullable: true
+        creado_en:
+          type: string
+          format: date-time
+
+    ReporteResumen:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        foto_url:
+          type: string
+          nullable: true
+        volumen_litros:
+          type: number
+        nivel:
+          type: string
+          enum: [bajo, medio, critico]
+        comentario:
+          type: string
+          nullable: true
+        creado_en:
+          type: string
+          format: date-time
+
+    ZonaDetalle:
+      type: object
+      properties:
+        zona:
+          $ref: '#/components/schemas/Zona'
+        reportes:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReporteResumen'
+        evidencia:
+          $ref: '#/components/schemas/Evidencia'
+          nullable: true
+
+    ReporteUsuario:
+      type: object
+      description: |
+        Reporte ciudadano con el estado actual de su zona y la evidencia de limpieza,
+        para la bandeja "Mis Reportes / Estado en mi Zona".
+      properties:
+        id:
+          type: integer
+          format: int64
+        zona_id:
+          type: integer
+          format: int64
+        foto_url:
+          type: string
+          nullable: true
+        volumen_litros:
+          type: number
+        nivel:
+          type: string
+          enum: [bajo, medio, critico]
+        comentario:
+          type: string
+          nullable: true
+        creado_en:
+          type: string
+          format: date-time
+        zona_direccion:
+          type: string
+        zona_estado:
+          type: string
+          enum: [pendiente, en_ruta, tratado]
+        zona_nivel:
+          type: string
+          enum: [bajo, medio, critico]
+        zona_lat:
+          type: number
+        zona_lng:
+          type: number
+        zona_volumen_estimado_litros:
+          type: number
+        zona_total_reportes:
+          type: integer
+        tratado_en:
+          type: string
+          format: date-time
+          nullable: true
+        evidencia_foto_url:
+          type: string
+          nullable: true
+        evidencia_creado_en:
+          type: string
+          format: date-time
+          nullable: true
+
+    Analisis:
+      type: object
+      properties:
+        volumen_litros:
+          type: number
+          example: 245
+        nivel:
+          type: string
+          enum: [bajo, medio, critico]
+        confianza:
+          type: number
+          example: 0.78
+        nitidez:
+          type: number
+          example: 312.4
+        nitido:
+          type: boolean
+        metodo:
+          type: string
+          example: heuristico_v1
+        recomendacion:
+          type: string
+        detalles:
+          type: object
+          additionalProperties: true
+        detecciones:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+
+    Camion:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        placa:
+          type: string
+          example: V1A-812
+        codigo_unidad:
+          type: string
+          example: COMP-01
+        capacidad_litros:
+          type: integer
+          example: 45000
+        carga_actual_litros:
+          type: number
+        estado:
+          type: string
+          enum: [operativo, en_ruta, mantenimiento]
+        lat:
+          type: number
+        lng:
+          type: number
+        rumbo_grados:
+          type: number
+        velocidad_kmh:
+          type: number
+        actualizado_en:
+          type: string
+          format: date-time
+
+    MapaEstado:
+      type: object
+      properties:
+        centro:
+          $ref: '#/components/schemas/Punto'
+        zonas:
+          type: array
+          items:
+            $ref: '#/components/schemas/Zona'
+        camiones:
+          type: array
+          items:
+            $ref: '#/components/schemas/Camion'
+
+    Punto:
+      type: object
+      properties:
+        lat:
+          type: number
+        lng:
+          type: number
+
+    Parada:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        zona_id:
+          type: integer
+          format: int64
+        orden:
+          type: integer
+        estado_parada:
+          type: string
+          enum: [pendiente, completada]
+        distancia_metros:
+          type: number
+        direccion_referencia:
+          type: string
+        lat:
+          type: number
+        lng:
+          type: number
+        volumen_estimado_litros:
+          type: number
+        nivel:
+          type: string
+          enum: [bajo, medio, critico]
+
+    Ruta:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        camion_id:
+          type: integer
+          format: int64
+        codigo_unidad:
+          type: string
+        estado:
+          type: string
+          enum: [activa, completada, reemplazada]
+        distancia_total_metros:
+          type: number
+        volumen_total_litros:
+          type: number
+        creado_en:
+          type: string
+          format: date-time
+        paradas:
+          type: array
+          items:
+            $ref: '#/components/schemas/Parada'
+
+    PuntoSerie:
+      type: object
+      properties:
+        periodo:
+          type: string
+          format: date
+        reportes_creados:
+          type: integer
+        zonas_tratadas:
+          type: integer
+        litros_recolectados:
+          type: number
+        tiempo_promedio_horas:
+          type: number
+
+    Estadisticas:
+      type: object
+      properties:
+        periodo:
+          type: string
+          enum: [semanal, mensual, anual]
+        desde:
+          type: string
+          format: date
+        hasta:
+          type: string
+          format: date
+        resumen:
+          type: object
+          properties:
+            reportes_creados:
+              type: integer
+            zonas_tratadas:
+              type: integer
+            litros_recolectados:
+              type: number
+            tiempo_promedio_horas:
+              type: number
+        series:
+          type: array
+          items:
+            $ref: '#/components/schemas/PuntoSerie'

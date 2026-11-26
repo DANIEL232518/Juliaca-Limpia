@@ -1,0 +1,585 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: light;
+  }
+
+  html,
+  body {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-fondo text-slate-800 antialiased;
+    font-family:
+      'Inter', 'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif;
+  }
+
+  app-root,
+  app-mapa {
+    display: block;
+  }
+
+  ::selection {
+    background: #00aeef;
+    color: #ffffff;
+  }
+
+  /* Scrollbar discreto para el panel lateral */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #cbd5e1 transparent;
+  }
+
+  *::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  *::-webkit-scrollbar-thumb {
+    background: #cbd5e1;
+    border-radius: 9999px;
+  }
+
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+}
+
+/* ------------------------------------------------------------------------- */
+/* Mapa                                                                      */
+/* ------------------------------------------------------------------------- */
+.leaflet-container {
+  background: #eef2f7;
+  font-family: inherit;
+  z-index: 0;
+}
+
+.leaflet-container a {
+  color: #004b93;
+}
+
+/* Suaviza el mapa base de OpenStreetMap para no competir con los marcadores. */
+.leaflet-tile-pane {
+  filter: saturate(0.62) brightness(1.04) contrast(0.97);
+}
+
+.leaflet-control-zoom a {
+  color: #004b93 !important;
+  font-weight: 700;
+}
+
+.leaflet-control-attribution {
+  font-size: 9px !important;
+  background: rgba(255, 255, 255, 0.82) !important;
+  backdrop-filter: blur(4px);
+}
+
+/* Marcadores de zona ------------------------------------------------------ */
+.jl-zone {
+  position: relative;
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border: 2.5px solid #ffffff;
+  border-radius: 9999px;
+  color: #ffffff;
+  cursor: pointer;
+  transition:
+    transform 160ms ease,
+    box-shadow 160ms ease;
+  box-shadow:
+    0 10px 20px -8px rgba(2, 32, 71, 0.55),
+    0 0 0 1px rgba(2, 32, 71, 0.08);
+}
+
+.jl-zone:hover {
+  transform: scale(1.12);
+}
+
+.jl-zone--critico {
+  background: linear-gradient(145deg, #ef4444, #d32f2f 62%);
+}
+
+.jl-zone--medio {
+  background: linear-gradient(145deg, #fdc94a, #fdb913 62%);
+  color: #5b3a00;
+}
+
+.jl-zone--bajo {
+  background: linear-gradient(145deg, #34c6f4, #00aeef 62%);
+}
+
+.jl-zone--tratado {
+  background: linear-gradient(145deg, #34d399, #16a34a 62%);
+}
+
+.jl-zone--tratado:hover {
+  transform: scale(1.06);
+}
+
+.jl-zone__badge {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  display: grid;
+  min-width: 16px;
+  height: 16px;
+  place-items: center;
+  padding: 0 3px;
+  border: 1.5px solid #ffffff;
+  border-radius: 9999px;
+  background: #ffffff;
+  color: #0f172a;
+  font-size: 9px;
+  font-weight: 800;
+  line-height: 1;
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.25);
+}
+
+.jl-zone--pulse::after {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: 9999px;
+  border: 2px solid rgba(211, 47, 47, 0.55);
+  animation: jl-pulse 1.8s ease-out infinite;
+  pointer-events: none;
+}
+
+@keyframes jl-pulse {
+  0% {
+    transform: scale(0.85);
+    opacity: 0.9;
+  }
+  70% {
+    transform: scale(1.55);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(1.55);
+    opacity: 0;
+  }
+}
+
+/* Camiones ---------------------------------------------------------------- */
+.jl-truck {
+  position: relative;
+  display: flex;
+  width: 92px;
+  flex-direction: column;
+  align-items: center;
+  pointer-events: none;
+}
+
+.jl-truck__rotor {
+  width: 42px;
+  height: 42px;
+  transform-origin: 50% 50%;
+  will-change: transform;
+  filter: drop-shadow(0 4px 8px rgba(2, 32, 71, 0.45));
+}
+
+.jl-truck__svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.jl-truck__tag {
+  margin-top: 1px;
+  padding: 0 4px;
+  border-radius: 4px;
+  background: #ffffff;
+  color: #004b93;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  line-height: 13px;
+  white-space: nowrap;
+  box-shadow: 0 2px 6px rgba(2, 32, 71, 0.28);
+}
+
+.jl-truck__bar {
+  width: 46px;
+  height: 4px;
+  margin-top: 2px;
+  overflow: hidden;
+  border-radius: 9999px;
+  background: rgba(226, 232, 240, 0.95);
+  box-shadow: inset 0 0 0 1px rgba(2, 32, 71, 0.12);
+}
+
+.jl-truck__bar > i {
+  display: block;
+  height: 100%;
+  border-radius: 9999px;
+  transition: width 600ms ease;
+}
+
+.jl-truck__meta {
+  display: flex;
+  gap: 4px;
+  margin-top: 1px;
+  padding: 0 3px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.9);
+  color: #475569;
+  font-size: 8px;
+  font-weight: 700;
+  line-height: 11px;
+  white-space: nowrap;
+}
+
+/* Paradas y bases --------------------------------------------------------- */
+.jl-stop {
+  display: grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border: 2px solid #ffffff;
+  border-radius: 9999px;
+  background: var(--c, #004b93);
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 800;
+  box-shadow: 0 3px 8px rgba(2, 32, 71, 0.35);
+}
+
+.jl-base {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform: translate(-4px, -50%);
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.94);
+  color: #334155;
+  font-size: 9px;
+  font-weight: 700;
+  white-space: nowrap;
+  box-shadow: 0 2px 8px rgba(2, 32, 71, 0.25);
+}
+
+.jl-base--deposito {
+  border-left: 3px solid #004b93;
+}
+
+.jl-base--descarga {
+  border-left: 3px solid #fdb913;
+}
+
+/* Leyenda ---------------------------------------------------------------- */
+.jl-dot {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  flex: 0 0 auto;
+  border-radius: 9999px;
+  background: var(--d, #94a3b8);
+  box-shadow: 0 0 0 1.5px rgba(255, 255, 255, 0.9);
+}
+
+.jl-truck-mini {
+  position: relative;
+  display: inline-block;
+  width: 15px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: 2px;
+  background: #004b93;
+  box-shadow: 5px 0 0 -2px #00aeef;
+}
+
+.jl-truck-mini::after {
+  content: '';
+  position: absolute;
+  right: -3px;
+  bottom: -2px;
+  width: 3px;
+  height: 3px;
+  border-radius: 9999px;
+  background: #1e293b;
+}
+
+/* Popup ------------------------------------------------------------------ */
+.leaflet-popup.jl-popup .leaflet-popup-content-wrapper {
+  overflow: hidden;
+  padding: 0;
+  border-radius: 16px;
+  box-shadow: 0 24px 60px -20px rgba(2, 32, 71, 0.45);
+}
+
+.leaflet-popup.jl-popup .leaflet-popup-content {
+  width: 302px !important;
+  max-width: min(302px, calc(100vw - 76px));
+  margin: 0;
+}
+
+.leaflet-popup.jl-popup .leaflet-popup-tip {
+  box-shadow: none;
+}
+
+.leaflet-popup.jl-popup a.leaflet-popup-close-button {
+  top: 7px;
+  right: 7px;
+  display: grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border-radius: 9999px;
+  background: rgba(241, 245, 249, 0.92);
+  color: #475569;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.jl-popup-card {
+  width: 100%;
+  padding-bottom: 10px;
+  color: #1e293b;
+}
+
+.jl-popup-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 11px 12px 0;
+}
+
+.jl-chip {
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: 9999px;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.jl-chip--pendiente {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.jl-chip--en_ruta {
+  background: #e0f2fe;
+  color: #075985;
+}
+
+.jl-chip--tratado {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.jl-chip--nivel-critico {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.jl-chip--nivel-medio {
+  background: #fef3c7;
+  color: #a16207;
+}
+
+.jl-chip--nivel-bajo {
+  background: #e0f2fe;
+  color: #0369a1;
+}
+
+.jl-popup-card h3 {
+  margin: 7px 0 8px;
+  padding: 0 12px;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.3;
+  color: #0f172a;
+}
+
+.jl-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+  margin-bottom: 8px;
+  padding: 7px 12px;
+  border-block: 1px solid #e2e8f0;
+  background: #f8fafc;
+}
+
+.jl-stats b {
+  display: block;
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1.1;
+  color: #004b93;
+}
+
+.jl-stats span {
+  display: block;
+  margin-top: 1px;
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #64748b;
+}
+
+.jl-photos {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px;
+  padding: 0 12px;
+}
+
+.jl-photos--single {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.jl-photos figure {
+  margin: 0;
+}
+
+.jl-photos img {
+  display: block;
+  width: 100%;
+  height: 82px;
+  object-fit: cover;
+  border-radius: 8px;
+  background: #e2e8f0;
+}
+
+.jl-photos--single img {
+  height: 132px;
+}
+
+.jl-photos figcaption {
+  margin-top: 2px;
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-align: center;
+  text-transform: uppercase;
+  color: #64748b;
+}
+
+.jl-photo-empty {
+  display: grid;
+  height: 82px;
+  place-content: center;
+  border: 1.5px dashed #cbd5e1;
+  border-radius: 8px;
+  background: #f1f5f9;
+  text-align: center;
+}
+
+.jl-photo-empty span {
+  font-size: 10px;
+  font-weight: 800;
+  color: #94a3b8;
+}
+
+.jl-photo-empty small {
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #cbd5e1;
+}
+
+.jl-photo-empty--verde {
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+}
+
+.jl-photo-empty--verde span {
+  color: #4ade80;
+}
+
+.jl-photo-empty--verde small {
+  color: #86efac;
+}
+
+.jl-comment {
+  margin: 7px 0 0;
+  padding: 0 12px;
+  font-size: 10.5px;
+  font-style: italic;
+  line-height: 1.45;
+  color: #475569;
+}
+
+.jl-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 7px 12px 0;
+  border-top: 1px solid #e2e8f0;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: #94a3b8;
+}
+
+.jl-foot--ok {
+  color: #16a34a;
+}
+
+.jl-observe {
+  margin: 3px 0 0;
+  padding: 0 12px;
+  font-size: 9.5px;
+  line-height: 1.4;
+  color: #15803d;
+}
+
+.jl-popup-loading {
+  display: grid;
+  place-items: center;
+  gap: 8px;
+  padding: 26px 32px;
+  text-align: center;
+}
+
+.jl-popup-loading span {
+  display: block;
+  width: 20px;
+  height: 20px;
+  border: 2px solid #004b93;
+  border-top-color: transparent;
+  border-radius: 9999px;
+  animation: jl-spin 700ms linear infinite;
+}
+
+.jl-popup-loading p {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: #64748b;
+}
+
+@keyframes jl-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 640px) {
+  .jl-base {
+    font-size: 8px;
+  }
+
+  .jl-truck {
+    width: 82px;
+  }
+
+  .jl-stats span {
+    font-size: 7.5px;
+  }
+}

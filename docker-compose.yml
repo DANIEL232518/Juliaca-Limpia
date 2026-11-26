@@ -1,0 +1,158 @@
+name: juliaca-limpia
+
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    container_name: jl-db
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-juliacalimpia}
+      POSTGRES_USER: ${POSTGRES_USER:-juliaca}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-juliaca_dev_2026}
+      TZ: America/Lima
+      PGTZ: America/Lima
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-juliaca} -d ${POSTGRES_DB:-juliacalimpia}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 15s
+    networks:
+      - juliaca-net
+    restart: unless-stopped
+
+  # MinIO dejó de publicar imágenes oficiales (sep-2026). PGSTY Silo es el fork
+  # comunitario mantenido, compatible a nivel de API S3, variables MINIO_* y consola.
+  minio:
+    image: pgsty/silo:RELEASE.2026-11-12T00-00-00Z
+    container_name: jl-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-juliaca_minio}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-juliaca_minio_2026}
+      MINIO_BROWSER_REDIRECT_URL: ${MINIO_BROWSER_REDIRECT_URL:-http://localhost:9001}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    networks:
+      - juliaca-net
+    restart: unless-stopped
+
+  minio-init:
+    image: pgsty/mc:RELEASE.2026-11-12T00-00-00Z
+    container_name: jl-minio-init
+    depends_on:
+      minio:
+        condition: service_started
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-juliaca_minio}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-juliaca_minio_2026}
+      MINIO_BUCKET: ${MINIO_BUCKET:-juliaca-limpia-fotos}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        until mc alias set local "http://minio:9000" "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD" >/dev/null 2>&1; do
+          echo "[minio-init] esperando a MinIO...";
+          sleep 2;
+        done
+        mc mb --ignore-existing "local/$$MINIO_BUCKET"
+        mc anonymous set download "local/$$MINIO_BUCKET"
+        echo "[minio-init] bucket $$MINIO_BUCKET listo (lectura pública de desarrollo)"
+    networks:
+      - juliaca-net
+    restart: "no"
+
+  ml-service:
+    build:
+      context: ./ml-service
+      dockerfile: Dockerfile
+    container_name: jl-ml
+    environment:
+      PORT: "8000"
+      MIN_SHARPNESS: ${MIN_SHARPNESS:-15}
+      ENABLE_YOLO_WORLD: ${ENABLE_YOLO_WORLD:-false}
+      YOLO_WORLD_MODEL: ${YOLO_WORLD_MODEL:-yolov8s-worldv2.pt}
+      TZ: America/Lima
+    ports:
+      - "${ML_PORT:-8000}:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)\""]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+    networks:
+      - juliaca-net
+    restart: unless-stopped
+
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    container_name: jl-api
+    environment:
+      API_PORT: "8080"
+      DATABASE_URL: postgres://${POSTGRES_USER:-juliaca}:${POSTGRES_PASSWORD:-juliaca_dev_2026}@db:5432/${POSTGRES_DB:-juliacalimpia}?sslmode=disable
+      ML_SERVICE_URL: http://ml-service:8000
+      MINIO_ENDPOINT: minio:9000
+      MINIO_PUBLIC_ENDPOINT: ${MINIO_PUBLIC_ENDPOINT:-http://localhost:9000}
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-juliaca_minio}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-juliaca_minio_2026}
+      MINIO_BUCKET: ${MINIO_BUCKET:-juliaca-limpia-fotos}
+      MINIO_USE_SSL: "false"
+      CORS_ORIGINS: ${CORS_ORIGINS:-*}
+      TZ: America/Lima
+    ports:
+      - "${API_PORT:-8080}:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+      ml-service:
+        condition: service_healthy
+      minio:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/health >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    networks:
+      - juliaca-net
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: jl-frontend
+    ports:
+      - "${FRONTEND_PORT:-4200}:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - juliaca-net
+    restart: unless-stopped
+
+networks:
+  juliaca-net:
+    driver: bridge
+
+volumes:
+  pgdata:
+    name: juliaca-limpia-pgdata
+  miniodata:
+    name: juliaca-limpia-miniodata

@@ -1,0 +1,45 @@
+# Entorno
+.env
+.env.*
+!.env.example
+
+# Docker / datos locales
+pgdata/
+miniodata/
+
+# Go
+api/bin/
+api/tmp/
+*.test
+*.out
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node / Angular
+node_modules/
+frontend/dist/
+frontend/.angular/
+npm-debug.log*
+
+# Editores / sistema
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Evidencias locales de pruebas
+tmp/
+*.pkt
+
+# Logs de construcción / despliegue
+*.log
+
+# Proyectos ajenos al repositorio
+PCSTP*/

@@ -1,0 +1,20 @@
+{
+  "name": "Juliaca Limpia",
+  "short_name": "Juliaca Limpia",
+  "description": "Gestión inteligente de residuos sólidos — Municipalidad Provincial de San Román",
+  "lang": "es-PE",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#F8FAFC",
+  "theme_color": "#004B93",
+  "icons": [
+    {
+      "src": "favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
